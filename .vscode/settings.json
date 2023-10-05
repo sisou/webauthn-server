@@ -1,0 +1,4 @@
+{
+    "deno.enable": true,
+    "deno.unstable": true // Required for use of Deno KV
+}

@@ -1,8 +1,9 @@
 {
     "tasks": {
-        "dev": "deno run --watch main.ts"
+        "dev": "deno run --allow-env --allow-net --unstable --watch main.ts"
     },
     "fmt": {
-        "indentWidth": 4
+        "indentWidth": 4,
+        "lineWidth": 120
     }
 }
