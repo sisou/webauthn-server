@@ -1,7 +1,7 @@
 import { z } from "https://deno.land/x/zod/mod.ts";
 
 import { createChallenge, deleteChallenge, getChallenge } from "./stores/challenge.ts";
-import { getSpkiPublicKey, setSpkiPublicKey } from "./stores/publicKey.ts";
+import { getPublicKeyData, setPublicKeyData } from "./stores/publicKey.ts";
 
 function cors(request: Request) {
     return {
@@ -61,12 +61,18 @@ async function registrationHandler(request: Request): Promise<Response> {
     const schema = z.object({
         credentialId: z.string(), // TODO: Verify base64 format
         spkiPublicKey: z.string(), // TODO: Verify hex format
+        multisigPubKey: z.string(), // TODO: Verify hex format
     });
 
-    const { credentialId, spkiPublicKey } = schema.parse(await request.json());
+    const { credentialId, spkiPublicKey, multisigPubKey } = schema.parse(await request.json());
 
     try {
-        await setSpkiPublicKey(credentialId, spkiPublicKey);
+        await setPublicKeyData(credentialId, {
+            version: 2,
+            spkiPublicKey,
+            createdAt: Math.floor(Date.now() / 1000),
+            multisigPubKey,
+        });
         return new Response("OK", { status: 200, ...cors(request) });
     } catch (error) {
         return new Response(error.message, { status: 500, ...cors(request) });
@@ -134,15 +140,15 @@ async function verifyLoginChallenge(request: Request): Promise<Response> {
     }
 
     // Fetch the public key from the database
-    const spkiPublicKey = await getSpkiPublicKey(credentialId);
-    if (!spkiPublicKey) {
+    const pubkeyData = await getPublicKeyData(credentialId);
+    if (!pubkeyData) {
         return new Response("Key ID not found", { status: 404, ...cors(request) });
     }
 
     // Import public key
     const importedPublicKey = await crypto.subtle.importKey(
         "spki",
-        fromHex(spkiPublicKey),
+        fromHex(pubkeyData.spkiPublicKey),
         {
             name: "ECDSA",
             namedCurve: "P-256",
@@ -184,7 +190,7 @@ async function verifyLoginChallenge(request: Request): Promise<Response> {
     // Delete the challenge
     await deleteChallenge(challenge);
 
-    return new Response(spkiPublicKey, { status: 200, ...cors(request) });
+    return new Response(JSON.stringify(pubkeyData), { status: 200, ...cors(request) });
 }
 
 function fromHex(hex: string): Uint8Array {
