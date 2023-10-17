@@ -11,7 +11,7 @@ function cors(request: Request) {
     };
 }
 
-const handler = (request: Request): Response | Promise<Response> => {
+const handler = async (request: Request): Promise<Response> => {
     if (request.method === "OPTIONS") {
         return new Response(null, {
             headers: {
@@ -24,36 +24,41 @@ const handler = (request: Request): Response | Promise<Response> => {
 
     const url = new URL(request.url);
 
-    switch (url.pathname) {
-        case "/": {
-            return new Response("Hello world!", { status: 200, ...cors(request) });
-        }
-        case "/register": {
-            switch (request.method) {
-                case "POST": {
-                    return registrationHandler(request);
-                }
-                default: {
-                    return new Response("Method not allowed", { status: 405, ...cors(request) });
+    try {
+        switch (url.pathname) {
+            case "/": {
+                return new Response("Hello world!", { status: 200, ...cors(request) });
+            }
+            case "/register": {
+                switch (request.method) {
+                    case "POST": {
+                        return await registrationHandler(request);
+                    }
+                    default: {
+                        return new Response("Method not allowed", { status: 405, ...cors(request) });
+                    }
                 }
             }
-        }
-        case "/challenge": {
-            switch (request.method) {
-                case "GET": {
-                    return createLoginChallenge(request);
-                }
-                case "POST": {
-                    return verifyLoginChallenge(request);
-                }
-                default: {
-                    return new Response("Method not allowed", { status: 405, ...cors(request) });
+            case "/challenge": {
+                switch (request.method) {
+                    case "GET": {
+                        return await createLoginChallenge(request);
+                    }
+                    case "POST": {
+                        return await verifyLoginChallenge(request);
+                    }
+                    default: {
+                        return new Response("Method not allowed", { status: 405, ...cors(request) });
+                    }
                 }
             }
+            default: {
+                return new Response("Not found", { status: 404, ...cors(request) });
+            }
         }
-        default: {
-            return new Response("Not found", { status: 404, ...cors(request) });
-        }
+    } catch (error) {
+        console.trace(error);
+        return new Response(error?.message, { status: 500, ...cors(request) });
     }
 };
 
@@ -67,18 +72,14 @@ async function registrationHandler(request: Request): Promise<Response> {
 
     const { credentialId, spkiPublicKey, algorithm, multisigPubKey } = schema.parse(await request.json());
 
-    try {
-        await setPublicKeyData(credentialId, {
-            version: 3,
-            spkiPublicKey,
-            algorithm,
-            createdAt: Math.floor(Date.now() / 1000),
-            multisigPubKey,
-        });
-        return new Response("OK", { status: 200, ...cors(request) });
-    } catch (error) {
-        return new Response(error.message, { status: 500, ...cors(request) });
-    }
+    await setPublicKeyData(credentialId, {
+        version: 3,
+        spkiPublicKey,
+        algorithm,
+        createdAt: Math.floor(Date.now() / 1000),
+        multisigPubKey,
+    });
+    return new Response("OK", { status: 200, ...cors(request) });
 }
 
 async function createLoginChallenge(request: Request): Promise<Response> {
