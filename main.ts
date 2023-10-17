@@ -60,16 +60,18 @@ const handler = (request: Request): Response | Promise<Response> => {
 async function registrationHandler(request: Request): Promise<Response> {
     const schema = z.object({
         credentialId: z.string(), // TODO: Verify base64 format
+        algorithm: z.number(), // COSEAlgorithmIdentifier
         spkiPublicKey: z.string(), // TODO: Verify hex format
         multisigPubKey: z.string(), // TODO: Verify hex format
     });
 
-    const { credentialId, spkiPublicKey, multisigPubKey } = schema.parse(await request.json());
+    const { credentialId, spkiPublicKey, algorithm, multisigPubKey } = schema.parse(await request.json());
 
     try {
         await setPublicKeyData(credentialId, {
-            version: 2,
+            version: 3,
             spkiPublicKey,
+            algorithm,
             createdAt: Math.floor(Date.now() / 1000),
             multisigPubKey,
         });
@@ -145,43 +147,83 @@ async function verifyLoginChallenge(request: Request): Promise<Response> {
         return new Response("Key ID not found", { status: 404, ...cors(request) });
     }
 
-    // Import public key
-    const importedPublicKey = await crypto.subtle.importKey(
-        "spki",
-        fromHex(pubkeyData.spkiPublicKey),
-        {
-            name: "ECDSA",
-            namedCurve: "P-256",
-            hash: { name: "SHA-256" },
-        },
-        false,
-        ["verify"],
-    );
+    let verified = false;
 
-    // Verify the signature
-    const signatureBase = new Uint8Array([
-        ...authenticatorData,
-        ...new Uint8Array(await crypto.subtle.digest("SHA-256", clientDataJSON)),
-    ]);
+    if (!pubkeyData.algorithm || pubkeyData.algorithm !== -7) {
+        // Import public key
+        const importedPublicKey = await crypto.subtle.importKey(
+            "spki",
+            fromHex(pubkeyData.spkiPublicKey),
+            {
+                name: "ECDSA",
+                namedCurve: "P-256",
+                hash: { name: "SHA-256" },
+            },
+            false,
+            ["verify"],
+        );
 
-    // Convert signature from ASN.1 sequence to "raw" format
-    const rStart = asn1Signature[4] === 0 ? 5 : 4;
-    const rEnd = rStart + 32;
-    const sStart = asn1Signature[rEnd + 2] === 0 ? rEnd + 3 : rEnd + 2;
-    const r = asn1Signature.slice(rStart, rEnd);
-    const s = asn1Signature.slice(sStart);
-    const rawSignature = new Uint8Array([...r, ...s]);
+        // Verify the signature
+        const signatureBase = new Uint8Array([
+            ...authenticatorData,
+            ...new Uint8Array(await crypto.subtle.digest("SHA-256", clientDataJSON)),
+        ]);
 
-    const verified = await crypto.subtle.verify(
-        {
-            name: "ECDSA",
-            // namedCurve: "P-256",
-            hash: { name: "SHA-256" },
-        },
-        importedPublicKey,
-        rawSignature,
-        signatureBase,
-    );
+        // Convert signature from ASN.1 sequence to "raw" format
+        const rStart = asn1Signature[4] === 0 ? 5 : 4;
+        const rEnd = rStart + 32;
+        const sStart = asn1Signature[rEnd + 2] === 0 ? rEnd + 3 : rEnd + 2;
+        const r = asn1Signature.slice(rStart, rEnd);
+        const s = asn1Signature.slice(sStart);
+        const rawSignature = new Uint8Array([...r, ...s]);
+
+        verified = await crypto.subtle.verify(
+            {
+                name: "ECDSA",
+                // namedCurve: "P-256",
+                hash: { name: "SHA-256" },
+            },
+            importedPublicKey,
+            rawSignature,
+            signatureBase,
+        );
+    }
+
+    if (pubkeyData.algorithm !== -8) {
+        // Import public key
+        const importedPublicKey = await crypto.subtle.importKey(
+            "spki",
+            fromHex(pubkeyData.spkiPublicKey),
+            {
+                name: "Ed25519",
+            },
+            false,
+            ["verify"],
+        );
+
+        // Verify the signature
+        const signatureBase = new Uint8Array([
+            ...authenticatorData,
+            ...new Uint8Array(await crypto.subtle.digest("SHA-256", clientDataJSON)),
+        ]);
+
+        // Convert signature from ASN.1 sequence to "raw" format
+        const rStart = asn1Signature[4] === 0 ? 5 : 4;
+        const rEnd = rStart + 32;
+        const sStart = asn1Signature[rEnd + 2] === 0 ? rEnd + 3 : rEnd + 2;
+        const r = asn1Signature.slice(rStart, rEnd);
+        const s = asn1Signature.slice(sStart);
+        const rawSignature = new Uint8Array([...r, ...s]);
+
+        verified = await crypto.subtle.verify(
+            {
+                name: "Ed25519",
+            },
+            importedPublicKey,
+            rawSignature,
+            signatureBase,
+        );
+    }
 
     if (!verified) {
         return new Response("Signature verification failed", { status: 400, ...cors(request) });

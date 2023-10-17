@@ -10,16 +10,22 @@ type PublicKeyRecordV2 = {
     multisigPubKey: string, // hex
 };
 
+type PublicKeyRecordV3 = Omit<PublicKeyRecordV2, 'version'> & {
+    version: 3,
+    algorithm: number, // COSEAlgorithmIdentifier
+};
+
 type PublicKeyRecord = PublicKeyRecordV1 | PublicKeyRecordV2;
 
 export type PublicKeyData = {
     spkiPublicKey: string, // hex
+    algorithm?: number, // COSEAlgorithmIdentifier
     createdAt?: number, // unix timestamp (seconds)
     lastAccessedAt?: number, // unix timestamp (seconds)
     multisigPubKey?: string, // hex
 };
 
-export async function setPublicKeyData(credentialId: string, data: PublicKeyRecordV2): Promise<void> {
+export async function setPublicKeyData(credentialId: string, data: PublicKeyRecordV3): Promise<void> {
     const kv = await Deno.openKv();
     const res = await kv.set([KEY, credentialId], data);
     if (!res.ok) {
