@@ -148,83 +148,38 @@ async function verifyLoginChallenge(request: Request): Promise<Response> {
         return new Response("Key ID not found", { status: 404, ...cors(request) });
     }
 
-    let verified = false;
+    const signatureBase = new Uint8Array([
+        ...authenticatorData,
+        ...new Uint8Array(await crypto.subtle.digest("SHA-256", clientDataJSON)),
+    ]);
 
-    if (!pubkeyData.algorithm || pubkeyData.algorithm !== -7) {
-        // Import public key
-        const importedPublicKey = await crypto.subtle.importKey(
-            "spki",
-            fromHex(pubkeyData.spkiPublicKey),
-            {
-                name: "ECDSA",
-                namedCurve: "P-256",
-                hash: { name: "SHA-256" },
-            },
-            false,
-            ["verify"],
-        );
+    // Import public key
+    const importedPublicKey = await crypto.subtle.importKey(
+        "spki",
+        fromHex(pubkeyData.spkiPublicKey),
+        (!pubkeyData.algorithm || pubkeyData.algorithm === -7) ? {
+            name: "ECDSA",
+            namedCurve: "P-256",
+            hash: { name: "SHA-256" },
+        } : {
+            name: "Ed25519"
+        },
+        false,
+        ["verify"],
+    );
 
-        // Verify the signature
-        const signatureBase = new Uint8Array([
-            ...authenticatorData,
-            ...new Uint8Array(await crypto.subtle.digest("SHA-256", clientDataJSON)),
-        ]);
-
-        // Convert signature from ASN.1 sequence to "raw" format
-        const rStart = asn1Signature[4] === 0 ? 5 : 4;
-        const rEnd = rStart + 32;
-        const sStart = asn1Signature[rEnd + 2] === 0 ? rEnd + 3 : rEnd + 2;
-        const r = asn1Signature.slice(rStart, rEnd);
-        const s = asn1Signature.slice(sStart);
-        const rawSignature = new Uint8Array([...r, ...s]);
-
-        verified = await crypto.subtle.verify(
-            {
-                name: "ECDSA",
-                // namedCurve: "P-256",
-                hash: { name: "SHA-256" },
-            },
-            importedPublicKey,
-            rawSignature,
-            signatureBase,
-        );
-    }
-
-    if (pubkeyData.algorithm !== -8) {
-        // Import public key
-        const importedPublicKey = await crypto.subtle.importKey(
-            "spki",
-            fromHex(pubkeyData.spkiPublicKey),
-            {
-                name: "Ed25519",
-            },
-            false,
-            ["verify"],
-        );
-
-        // Verify the signature
-        const signatureBase = new Uint8Array([
-            ...authenticatorData,
-            ...new Uint8Array(await crypto.subtle.digest("SHA-256", clientDataJSON)),
-        ]);
-
-        // Convert signature from ASN.1 sequence to "raw" format
-        const rStart = asn1Signature[4] === 0 ? 5 : 4;
-        const rEnd = rStart + 32;
-        const sStart = asn1Signature[rEnd + 2] === 0 ? rEnd + 3 : rEnd + 2;
-        const r = asn1Signature.slice(rStart, rEnd);
-        const s = asn1Signature.slice(sStart);
-        const rawSignature = new Uint8Array([...r, ...s]);
-
-        verified = await crypto.subtle.verify(
-            {
-                name: "Ed25519",
-            },
-            importedPublicKey,
-            rawSignature,
-            signatureBase,
-        );
-    }
+    // Verify the signature
+    const verified = await crypto.subtle.verify(
+        (!pubkeyData.algorithm || pubkeyData.algorithm === -7) ? {
+            name: "ECDSA",
+            hash: { name: "SHA-256" },
+        } : {
+            name: "Ed25519"
+        },
+        importedPublicKey,
+        asn1Signature.length === 64 ? asn1Signature : asn1ToRaw(asn1Signature),
+        signatureBase,
+    );
 
     if (!verified) {
         return new Response("Signature verification failed", { status: 400, ...cors(request) });
@@ -238,6 +193,18 @@ async function verifyLoginChallenge(request: Request): Promise<Response> {
 
 function fromHex(hex: string): Uint8Array {
     return new Uint8Array(hex.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)));
+}
+
+/**
+ * Convert signature from ASN.1 sequence to "raw" format
+ */
+function asn1ToRaw(asn1: Uint8Array): Uint8Array {
+    const rStart = asn1[4] === 0 ? 5 : 4;
+    const rEnd = rStart + 32;
+    const sStart = asn1[rEnd + 2] === 0 ? rEnd + 3 : rEnd + 2;
+    const r = asn1.slice(rStart, rEnd);
+    const s = asn1.slice(sStart);
+    return new Uint8Array([...r, ...s]);
 }
 
 const port = parseInt(Deno.env.get("PORT") || "8080");
